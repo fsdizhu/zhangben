@@ -4,6 +4,21 @@ dist/
 .build/
 .output/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # Environment variables
 .env
 .env.local
@@ -21,6 +36,7 @@ yarn-error.log*
 *.swp
 *.swo
 *.vsix
+.trae/
 
 # OS
 .DS_Store
@@ -31,3 +47,7 @@ Icon?
 # Cloudflare
 wrangler.toml
 .env.production
+
+# User data files
+users.json
+config.json

@@ -1,151 +1,216 @@
 import os
 import json
-from datetime import datetime
-from utils.common import get_app_data_dir, encrypt_password
+import hashlib
+from utils.common import get_app_data_dir
 
 
-class UserAuth:
-    """用户认证模块 - 管理用户登录、密码等功能"""
+# 权限定义
+PERMISSIONS = {
+    'add_entry': '增加账目',
+    'edit_entry': '修改账目',
+    'delete_entry': '删除账目',
+    'import_entry': '导入账目',
+    'export_data': '导出数据',
+    'backup_data': '备份数据',
+    'clear_database': '清空数据库',
+    'manage_users': '管理用户',
+}
+
+# 默认管理员密码（可通过环境变量配置）
+DEFAULT_ADMIN_PASSWORD = os.environ.get('ACCOUNT_BOOK_ADMIN_PASSWORD', 'Fs0753@0753')
+
+
+def encrypt_password(password: str) -> str:
+    """加密密码（使用SHA-256）"""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+
+class User:
+    """用户类"""
+    
+    def __init__(self, username: str, password_hash: str, is_super: bool = False, permissions: list = None):
+        self.username = username
+        self.password_hash = password_hash
+        self.is_super = is_super
+        self.permissions = permissions if permissions else []
+    
+    def has_permission(self, permission: str) -> bool:
+        """检查是否有权限"""
+        if self.is_super:
+            return True
+        return permission in self.permissions
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            'username': self.username,
+            'password_hash': self.password_hash,
+            'is_super': self.is_super,
+            'permissions': self.permissions
+        }
+
+
+class UserManager:
+    """用户管理类"""
     
     def __init__(self):
-        self.app_data_dir = get_app_data_dir()
-        self.users_file = os.path.join(self.app_data_dir, 'users.json')
-        self.users = self._load_users()
+        self.users_file = os.path.join(get_app_data_dir(), 'users.json')
+        self._init_users()
     
-    def _load_users(self):
-        """加载用户数据"""
-        default_users = {
-            "root": {
-                "password": encrypt_password("Fs0753@0753"),
-                "is_super": True
-            }
-        }
-        
+    def _init_users(self):
+        """初始化用户数据"""
         if not os.path.exists(self.users_file):
-            self._save_users(default_users)
-            return default_users
-        
+            # 创建默认管理员用户
+            default_user = User(
+                username='root',
+                password_hash=encrypt_password(DEFAULT_ADMIN_PASSWORD),
+                is_super=True,
+                permissions=list(PERMISSIONS.keys())
+            )
+            self._save_users([default_user])
+        else:
+            # 检查并迁移旧格式数据
+            self._migrate_old_format()
+    
+    def _migrate_old_format(self):
+        """迁移旧格式数据到新格式"""
         try:
             with open(self.users_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+            
+            # 检查是否是旧格式（对象形式）
+            if isinstance(data, dict) and not 'username' in data:
+                new_users = []
+                for username, user_data in data.items():
+                    new_users.append(User(
+                        username=username,
+                        password_hash=user_data.get('password', user_data.get('password_hash', '')),
+                        is_super=user_data.get('is_super', False),
+                        permissions=list(PERMISSIONS.keys()) if user_data.get('is_super', False) else []
+                    ))
+                self._save_users(new_users)
+                print("已迁移旧格式用户数据")
         except Exception as e:
-            print(f"加载用户数据失败: {e}")
-            return default_users
+            print(f"迁移用户数据失败: {e}")
     
-    def _save_users(self, users):
+    def _load_users(self) -> list:
+        """加载用户数据"""
+        try:
+            with open(self.users_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+                # 兼容旧格式
+                if isinstance(data, dict) and not 'username' in data:
+                    users = []
+                    for username, user_data in data.items():
+                        users.append(User(
+                            username=username,
+                            password_hash=user_data.get('password', user_data.get('password_hash', '')),
+                            is_super=user_data.get('is_super', False),
+                            permissions=list(PERMISSIONS.keys()) if user_data.get('is_super', False) else []
+                        ))
+                    return users
+                
+                # 新格式
+                return [User(**user) for user in data]
+        except Exception:
+            return []
+    
+    def _save_users(self, users: list):
         """保存用户数据"""
         try:
             with open(self.users_file, 'w', encoding='utf-8') as f:
-                json.dump(users, f, ensure_ascii=False, indent=2)
+                json.dump([user.to_dict() for user in users], f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存用户数据失败: {e}")
     
-    def login(self, username, password):
-        """用户登录验证"""
-        if not username or not password:
-            return False, None, False
+    def authenticate(self, username: str, password: str) -> User:
+        """验证用户身份"""
+        users = self._load_users()
+        password_hash = encrypt_password(password)
         
-        username = username.strip()
+        for user in users:
+            if user.username == username and user.password_hash == password_hash:
+                return user
         
-        if username in self.users:
-            encrypted_password = encrypt_password(password)
-            if self.users[username]['password'] == encrypted_password:
-                return True, username, self.users[username].get('is_super', False)
-        
-        return False, None, False
-    
-    def verify_password(self, username, password):
-        """验证密码是否正确"""
-        if username in self.users:
-            encrypted_password = encrypt_password(password)
-            return self.users[username]['password'] == encrypted_password
-        return False
-    
-    def change_password(self, username, old_password, new_password):
-        """修改密码"""
-        if not self.verify_password(username, old_password):
-            return False, "当前密码错误"
-        
-        if not new_password:
-            return False, "新密码不能为空"
-        
-        self.users[username]['password'] = encrypt_password(new_password)
-        self._save_users(self.users)
-        return True, "密码修改成功"
-    
-    def reset_password(self, username, new_password, super_password=None):
-        """重置密码"""
-        if username == "root":
-            # 超级用户重置：需要验证码（初始密码+时间戳）
-            current_time = datetime.now().strftime("%m%d%H")
-            expected_code = "Fs0753@0753" + current_time
-            if super_password != expected_code:
-                return False, "超级用户验证码错误"
-        else:
-            # 普通用户重置：需要超级用户密码
-            if not self.verify_password("root", super_password):
-                return False, "超级用户密码错误"
-        
-        self.users[username]['password'] = encrypt_password(new_password)
-        self._save_users(self.users)
-        return True, "密码重置成功"
-    
-    def add_user(self, username, password, is_super=False):
-        """添加新用户"""
-        if not username or not password:
-            return False, "用户名和密码不能为空"
-        
-        if username in self.users:
-            return False, "用户名已存在"
-        
-        self.users[username] = {
-            "password": encrypt_password(password),
-            "is_super": is_super
-        }
-        self._save_users(self.users)
-        return True, "用户添加成功"
-    
-    def delete_user(self, username):
-        """删除用户"""
-        if username == "root":
-            return False, "不能删除超级用户root"
-        
-        if username not in self.users:
-            return False, "用户不存在"
-        
-        del self.users[username]
-        self._save_users(self.users)
-        return True, "用户删除成功"
-    
-    def update_user(self, username, password=None, is_super=None):
-        """更新用户信息"""
-        if username not in self.users:
-            return False, "用户不存在"
-        
-        if password:
-            self.users[username]['password'] = encrypt_password(password)
-        
-        if is_super is not None:
-            self.users[username]['is_super'] = is_super
-        
-        self._save_users(self.users)
-        return True, "用户更新成功"
-    
-    def get_user_info(self, username):
-        """获取用户信息"""
-        if username in self.users:
-            return {
-                'username': username,
-                'is_super': self.users[username].get('is_super', False)
-            }
         return None
     
-    def get_all_users(self):
-        """获取所有用户列表"""
-        return list(self.users.keys())
+    def get_user(self, username: str) -> User:
+        """获取用户信息"""
+        users = self._load_users()
+        for user in users:
+            if user.username == username:
+                return user
+        return None
     
-    def is_super_user(self, username):
-        """检查是否为超级用户"""
-        if username in self.users:
-            return self.users[username].get('is_super', False)
-        return False
+    def add_user(self, username: str, password: str, is_super: bool = False, permissions: list = None):
+        """添加用户"""
+        users = self._load_users()
+        
+        # 检查用户名是否已存在
+        for user in users:
+            if user.username == username:
+                raise ValueError(f"用户名 '{username}' 已存在")
+        
+        # 创建新用户
+        new_user = User(
+            username=username,
+            password_hash=encrypt_password(password),
+            is_super=is_super,
+            permissions=permissions if permissions else []
+        )
+        
+        users.append(new_user)
+        self._save_users(users)
+    
+    def update_user(self, username: str, password: str = None, is_super: bool = None, permissions: list = None):
+        """更新用户信息"""
+        users = self._load_users()
+        found = False
+        
+        for user in users:
+            if user.username == username:
+                if password:
+                    user.password_hash = encrypt_password(password)
+                if is_super is not None:
+                    user.is_super = is_super
+                if permissions is not None:
+                    user.permissions = permissions
+                found = True
+                break
+        
+        if not found:
+            raise ValueError(f"用户 '{username}' 不存在")
+        
+        self._save_users(users)
+    
+    def delete_user(self, username: str):
+        """删除用户"""
+        if username == 'root':
+            raise ValueError("不能删除管理员账户")
+        
+        users = self._load_users()
+        original_count = len(users)
+        target_username = username.strip().lower()
+        users = [user for user in users if user.username.strip().lower() != target_username]
+        
+        if len(users) == original_count:
+            raise ValueError(f"用户 '{username}' 不存在")
+        
+        self._save_users(users)
+    
+    def get_all_users(self) -> list:
+        """获取所有用户"""
+        return self._load_users()
+    
+    def get_all_permissions(self) -> dict:
+        """获取所有权限定义"""
+        return PERMISSIONS
+    
+    def change_password(self, username: str, old_password: str, new_password: str):
+        """修改密码"""
+        user = self.authenticate(username, old_password)
+        if not user:
+            raise ValueError("原密码不正确")
+        
+        self.update_user(username, password=new_password)
