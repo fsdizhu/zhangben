@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from user_auth import UserAuth
+from user_auth import UserManager
 
 
 class LoginWindow:
@@ -14,13 +14,12 @@ class LoginWindow:
         
         self.center_window()
         
-        self.user_auth = UserAuth()
+        self.user_manager = UserManager()
         
         self.create_login_widgets()
         
         self.logged_in = False
         self.current_user = None
-        self.is_super_user = False
     
     def center_window(self):
         """使窗口居中显示"""
@@ -69,12 +68,11 @@ class LoginWindow:
             messagebox.showwarning("警告", "请输入用户名和密码")
             return
         
-        success, user, is_super = self.user_auth.login(username, password)
+        user = self.user_manager.authenticate(username, password)
         
-        if success:
+        if user:
             self.logged_in = True
             self.current_user = user
-            self.is_super_user = is_super
             self.root.destroy()
         else:
             messagebox.showerror("错误", "用户名或密码错误")
@@ -102,21 +100,10 @@ class LoginWindow:
         username_entry = ttk.Entry(frame, textvariable=username_var, width=20)
         username_entry.pack(pady=8)
         
-        ttk.Label(frame, text="验证方式:").pack(pady=8)
-        
-        super_frame = ttk.Frame(frame)
-        super_frame.pack(pady=4)
-        ttk.Label(super_frame, text="超级用户验证码:").pack(side=tk.LEFT, padx=5)
-        super_code_var = tk.StringVar()
-        super_code_entry = ttk.Entry(super_frame, textvariable=super_code_var, show="*", width=15)
-        super_code_entry.pack(side=tk.LEFT, padx=5)
-        
-        normal_frame = ttk.Frame(frame)
-        normal_frame.pack(pady=4)
-        ttk.Label(normal_frame, text="超级用户密码:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(frame, text="超级用户密码:").pack(pady=8)
         admin_password_var = tk.StringVar()
-        admin_password_entry = ttk.Entry(normal_frame, textvariable=admin_password_var, show="*", width=15)
-        admin_password_entry.pack(side=tk.LEFT, padx=5)
+        admin_password_entry = ttk.Entry(frame, textvariable=admin_password_var, show="*", width=20)
+        admin_password_entry.pack(pady=8)
         
         ttk.Label(frame, text="新密码:").pack(pady=8)
         new_password_var = tk.StringVar()
@@ -130,7 +117,6 @@ class LoginWindow:
         
         def confirm_reset():
             username = username_var.get().strip()
-            super_code = super_code_var.get().strip()
             admin_password = admin_password_var.get().strip()
             new_password = new_password_var.get().strip()
             confirm_password = confirm_password_var.get().strip()
@@ -139,8 +125,13 @@ class LoginWindow:
                 messagebox.showwarning("警告", "请输入用户名")
                 return
             
-            if username not in self.user_auth.get_all_users():
+            user = self.user_manager.get_user(username)
+            if not user:
                 messagebox.showwarning("警告", "用户名不存在")
+                return
+            
+            if not admin_password:
+                messagebox.showwarning("警告", "请输入超级用户密码")
                 return
             
             if not new_password:
@@ -151,16 +142,19 @@ class LoginWindow:
                 messagebox.showwarning("警告", "两次输入的密码不一致")
                 return
             
-            if username == "root":
-                success, msg = self.user_auth.reset_password(username, new_password, super_code)
-            else:
-                success, msg = self.user_auth.reset_password(username, new_password, admin_password)
+            # 验证超级用户密码
+            super_user = self.user_manager.authenticate('root', admin_password)
+            if not super_user:
+                messagebox.showwarning("警告", "超级用户密码不正确")
+                return
             
-            if success:
-                messagebox.showinfo("成功", msg)
+            # 更新用户密码
+            try:
+                self.user_manager.update_user(username, new_password)
+                messagebox.showinfo("成功", "密码重置成功")
                 forgot_window.destroy()
-            else:
-                messagebox.showwarning("警告", msg)
+            except Exception as e:
+                messagebox.showwarning("警告", str(e))
         
         button_frame = ttk.Frame(frame)
         button_frame.pack(pady=20)

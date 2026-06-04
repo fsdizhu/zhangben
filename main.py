@@ -10,20 +10,15 @@ def main():
     login_root.mainloop()
 
     # 如果登录成功，启动主应用
-    if login_window.logged_in:
+    if login_window.logged_in and login_window.current_user:
         from gui.main_window import AccountBookGUI
 
         root = tk.Tk()
-        app = AccountBookGUI(
-            root,
-            is_super_user=login_window.is_super_user,
-            current_username=login_window.current_user
-        )
+        app = AccountBookGUI(root, current_user=login_window.current_user)
         root.mainloop()
 
 
 if __name__ == "__main__":
-    # 获取 src 目录的父目录并添加到 Python 路径
     import sys
     import os
     current_dir = os.path.dirname(os.path.abspath(__file__))

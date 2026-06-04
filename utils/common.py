@@ -23,13 +23,20 @@ def encrypt_password(password):
 
 
 def validate_date_format(date_str):
-    """验证日期格式是否为YYYYMMDD"""
+    """验证日期格式是否为YYYYMMDD或YYYYMM00（00表示日期不详）"""
     if not isinstance(date_str, str) or len(date_str) != 8 or not date_str.isdigit():
         return False
     try:
+        year = int(date_str[:4])
+        month = int(date_str[4:6])
+        day = int(date_str[6:8])
+        # 允许日期为00表示不详
+        if day == 0 and month >= 1 and month <= 12:
+            return True
+        # 正常日期校验
         datetime.strptime(date_str, "%Y%m%d")
         return True
-    except ValueError:
+    except (ValueError, IndexError):
         return False
 
 
